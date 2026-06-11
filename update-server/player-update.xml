@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <update>
-  <version>1.0.1</version>
-  <zipUrl>http://10.107.188.6/content-update/ContentNuovo_Player_101.zip</zipUrl>
-  <sha256></sha256>
+  <version>1.0.2</version>
+  <zipUrl>http://10.107.188.6/content-update/ContentNuovo_Player_102.zip</zipUrl>
+  <sha256>afecdcda065ea0a320e238629e147ab4c45fae05bbe7ba830a4f6d69b548d9af</sha256>
 </update>

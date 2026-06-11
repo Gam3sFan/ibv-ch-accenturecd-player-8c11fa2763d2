@@ -26,7 +26,7 @@ namespace ContentDistributionPlayer
 {
     public partial class MainForm : Form
     {
-        public static string APP_VERSION = "1.0.0";
+        public static string APP_VERSION = "1.0.2";
 
         #region Config data
         private string _nodeJSServerHost;
