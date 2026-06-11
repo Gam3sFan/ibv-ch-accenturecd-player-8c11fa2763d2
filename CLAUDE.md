@@ -291,21 +291,26 @@ CTRL+G control panel. Point `AutoUpdateManifestUrl` to an XML file like
 The manifest `<version>` is compared with `MainForm.APP_VERSION`, not with the Windows file-version
 metadata of `Player.exe`. The current `MainForm.APP_VERSION` is shown in the CTRL+G panel.
 
-To prepare a local static-server release:
+To prepare a static-server release, run the packaging script with **no arguments**:
 
 ```bat
-update-server\build-update-package.cmd 1.0.1
+update-server\build-update-package.cmd
 ```
 
-The script zips the contents of `Player/bin/Release/` as `Player-<version>.zip`, calculates SHA256,
-and updates `player-update.xml`.
-If the repo drive has little free space, pass an output folder to use as the static-server root:
+With no version argument it **auto-increments the patch** of `MainForm.APP_VERSION` (e.g. `1.0.0` →
+`1.0.1`), writes it back into the source, **rebuilds** the player in Release so the shipped `.exe`
+carries the new version, zips `Player/bin/Release/` as `Player-<version>.zip`, computes SHA256, and
+updates `player-update.xml`. If the build fails, the source version bump is reverted automatically.
+You can still force a version (`build-update-package.cmd 1.5.0`) or redirect the output to the real
+server root (third arg = base URL):
 
 ```bat
-update-server\build-update-package.cmd 1.0.1 D:\ContentDistribution-player-update-server
+update-server\build-update-package.cmd "" D:\ContentDistribution-player-update-server http://updates.local
 ```
 
-The ZIP must contain the **contents** of `Player/bin/Release/`, not an extra parent folder. If the
+See [update-server/README.md](update-server/README.md) for the full guide and the PowerShell knobs
+(`-Increment minor`, `-SkipBuild`, …). The ZIP must contain the **contents** of `Player/bin/Release/`,
+not an extra parent folder. If the
 manifest version is newer than `MainForm.APP_VERSION`, the control panel downloads the ZIP under
 `ContentsFolder/updates/<version>/`, verifies `sha256` when present, extracts it, writes
 `install-update.cmd`, and asks whether to install. If confirmed, the player starts that script and

@@ -31,10 +31,16 @@ namespace ContentDistributionPlayer.Utilities
                 LogTracer.Instance.Trace("Auto-update check started: " + manifestUrl);
 
                 string xml;
-                using (var client = new WebClient())
-                using (cancellationToken.Register(() => client.CancelAsync()))
+                // Fail fast if the update server is offline or hangs: a manual check must not
+                // leave the panel stuck on "Checking..." for the WebClient default (~100s).
+                using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
                 {
-                    xml = await client.DownloadStringTaskAsync(new Uri(manifestUrl));
+                    timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+                    using (var client = new WebClient())
+                    using (timeoutCts.Token.Register(() => client.CancelAsync()))
+                    {
+                        xml = await client.DownloadStringTaskAsync(new Uri(manifestUrl));
+                    }
                 }
 
                 var manifest = XDocument.Parse(xml).Root;
@@ -80,7 +86,19 @@ namespace ContentDistributionPlayer.Utilities
             }
             catch (Exception ex)
             {
-                LastState = "Error: " + ex.Message;
+                // Keep the operator-facing message clean; the full detail goes to the log.
+                string reason = ex.Message;
+                var webEx = ex as WebException;
+                if (webEx != null &&
+                    (webEx.Status == WebExceptionStatus.ConnectFailure ||
+                     webEx.Status == WebExceptionStatus.NameResolutionFailure ||
+                     webEx.Status == WebExceptionStatus.Timeout ||
+                     webEx.Status == WebExceptionStatus.RequestCanceled))
+                {
+                    reason = "update server not reachable";
+                }
+
+                LastState = "Error: " + reason;
                 LogTracer.Instance.Trace("Auto-update error: " + ex.Message, TraceEventType.Error);
                 return null;
             }
@@ -116,6 +134,16 @@ if not errorlevel 1 (
   goto wait
 )
 xcopy ""%SRC%\*"" ""%DST%\"" /E /Y /I
+set ""RC=%errorlevel%""
+if not ""%RC%""==""0"" (
+  echo.
+  echo [ERROR] Update copy failed. xcopy exit code: %RC%
+  echo Player was NOT restarted. Files in ""%DST%"" may be partially updated.
+  echo Fix file locks or permissions, then run this script again:
+  echo   ""%~f0""
+  pause
+  exit /b 1
+)
 start """" ""%DST%\Player.exe""
 ", extractPath, appPath, currentPid);
             File.WriteAllText(scriptPath, content);
