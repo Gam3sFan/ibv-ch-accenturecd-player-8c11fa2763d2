@@ -60,6 +60,10 @@ namespace ContentDistributionPlayer.Components
         private int _screenWidth;
         private int _screenHeight;
         private bool _forceClose = false;
+        public bool IsConnected
+        {
+            get { return _client != null && _client.IsConnected; }
+        }
         
         public RTC_EventError OnConnectionError;
         public RTC_EventGenericNoParams OnClientNotUpdatedError;
@@ -195,7 +199,12 @@ namespace ContentDistributionPlayer.Components
 
                     _client.ApplicationMessageReceivedAsync += e => 
                     {
-                        LogTracer.Instance.Trace(string.Format(@"Message received from NodeJS server: topic ({0}) - payload ({1})", e.ApplicationMessage.Topic, Encoding.UTF8.GetString(e.ApplicationMessage.Payload)));
+                        var payload = e.ApplicationMessage.PayloadSegment;
+                        string strPayload = payload.Array == null
+                            ? string.Empty
+                            : Encoding.UTF8.GetString(payload.Array, payload.Offset, payload.Count);
+
+                        LogTracer.Instance.Trace(string.Format(@"Message received from NodeJS server: topic ({0}) - payload ({1})", e.ApplicationMessage.Topic, strPayload));
 
                         /*
                         Console.WriteLine("### RECEIVED APPLICATION MESSAGE ###");
@@ -206,77 +215,84 @@ namespace ContentDistributionPlayer.Components
                         Console.WriteLine();
                         */
 
-                        string strPayload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
-
                         Console.WriteLine("REALTIME--> " + e.ApplicationMessage.Topic);
 
-                        if (e.ApplicationMessage.Topic == INIT_TOPIC)
+                        try
                         {
-                            JObject jsonResult = JObject.Parse(strPayload);
-                            OnInitPresentation?.Invoke(jsonResult);
-                        }
-                        else if (e.ApplicationMessage.Topic == UNLOAD_TOPIC)
-                        {
-                            OnUnloadPresentation?.Invoke();
-                        }
-                        else if (e.ApplicationMessage.Topic == GOTO_TOPIC)
-                        {
-                            JObject jsonResult = JObject.Parse(strPayload);
-                            OnGotoScene?.Invoke(jsonResult);
-                        }
-                        else if (e.ApplicationMessage.Topic == CLIENT_TOPIC)
-                        {
-                            // use the action attribute to determine the message data
-                            JObject message = JObject.Parse(strPayload);
-                            if (message != null)
+                            if (e.ApplicationMessage.Topic == INIT_TOPIC)
                             {
-                                string action = message.Get<string>("action");
-                                if (action == "room-init")
+                                JObject jsonResult = JObject.Parse(strPayload);
+                                OnInitPresentation?.Invoke(jsonResult);
+                            }
+                            else if (e.ApplicationMessage.Topic == UNLOAD_TOPIC)
+                            {
+                                OnUnloadPresentation?.Invoke();
+                            }
+                            else if (e.ApplicationMessage.Topic == GOTO_TOPIC)
+                            {
+                                JObject jsonResult = JObject.Parse(strPayload);
+                                OnGotoScene?.Invoke(jsonResult);
+                            }
+                            else if (e.ApplicationMessage.Topic == CLIENT_TOPIC)
+                            {
+                                // use the action attribute to determine the message data
+                                JObject message = JObject.Parse(strPayload);
+                                if (message != null)
                                 {
-                                    // now it communicates the room PIN code
-                                    var data = message.Get<JObject>("data");
-                                    OnConnectionSuccess?.Invoke(data);
+                                    string action = message.Get<string>("action");
+                                    if (action == "room-init")
+                                    {
+                                        // now it communicates the room PIN code
+                                        var data = message.Get<JObject>("data");
+                                        OnConnectionSuccess?.Invoke(data);
+                                    }
                                 }
                             }
-                        }
-                        else if (e.ApplicationMessage.Topic == CLIENTUID_TOPIC)
-                        {
-                            JObject message = JObject.Parse(strPayload);
-                            if (message != null)
+                            else if (e.ApplicationMessage.Topic == CLIENTUID_TOPIC)
                             {
-                                string action = message.Get<string>("action");
-                                if (action == "app-need-update")
+                                JObject message = JObject.Parse(strPayload);
+                                if (message != null)
                                 {
-                                    // used to force the client app to be updated
-                                    OnClientNotUpdatedError?.Invoke();
+                                    string action = message.Get<string>("action");
+                                    if (action == "app-need-update")
+                                    {
+                                        // used to force the client app to be updated
+                                        OnClientNotUpdatedError?.Invoke();
+                                    }
                                 }
                             }
+                            // live contents
+                            else if (e.ApplicationMessage.Topic == LIVEINIT_TOPIC)
+                            {
+                                JObject jsonResult = JObject.Parse(strPayload);
+                                OnInitLiveContent?.Invoke(jsonResult);
+                            }
+                            else if (e.ApplicationMessage.Topic == LIVEUNLOAD_TOPIC)
+                            {
+                                OnUnloadLiveContent?.Invoke();
+                            }
+                            else if (e.ApplicationMessage.Topic == LIVEGOTO_TOPIC)
+                            {
+                                JObject jsonResult = JObject.Parse(strPayload);
+                                OnGotoSceneLiveContent?.Invoke(jsonResult);
+                            }
+                            // display mode start/stop
+                            else if (e.ApplicationMessage.Topic == CLIENT_DISPLAYMODE_START_TOPIC)
+                            {
+                                JObject jsonResult = JObject.Parse(strPayload);
+                                OnClientDisplayModeStart?.Invoke(jsonResult);
+                            }
+                            else if (e.ApplicationMessage.Topic == CLIENT_DISPLAYMODE_STOP_TOPIC ||
+                                     e.ApplicationMessage.Topic == DISPLAYMODE_STOP_TOPIC)
+                            {
+                                OnClientDisplayModeStop?.Invoke();
+                            }
                         }
-                        // live contents
-                        else if (e.ApplicationMessage.Topic == LIVEINIT_TOPIC)
+                        catch (Exception ex)
                         {
-                            JObject jsonResult = JObject.Parse(strPayload);
-                            OnInitLiveContent?.Invoke(jsonResult);
-                        }
-                        else if (e.ApplicationMessage.Topic == LIVEUNLOAD_TOPIC)
-                        {
-                            OnUnloadLiveContent?.Invoke();
-                        }
-                        else if (e.ApplicationMessage.Topic == LIVEGOTO_TOPIC)
-                        {
-                            JObject jsonResult = JObject.Parse(strPayload);
-                            OnGotoSceneLiveContent?.Invoke(jsonResult);
-                        }
-                        // display mode start/stop
-                        else if (e.ApplicationMessage.Topic == CLIENT_DISPLAYMODE_START_TOPIC)
-                        {
-                            JObject jsonResult = JObject.Parse(strPayload);
-                            OnClientDisplayModeStart?.Invoke(jsonResult);
-                        }
-                        else if (e.ApplicationMessage.Topic == CLIENT_DISPLAYMODE_STOP_TOPIC ||
-                                 e.ApplicationMessage.Topic == DISPLAYMODE_STOP_TOPIC)
-                        {
-                            OnClientDisplayModeStop?.Invoke();
+                            var message = string.Format("Error handling MQTT message on topic {0}: {1}", e.ApplicationMessage.Topic, ex.Message);
+                            LogTracer.Instance.Trace(message, System.Diagnostics.TraceEventType.Error);
+                            OnError?.Invoke(message);
                         }
 
                         return Task.CompletedTask;
@@ -285,7 +301,7 @@ namespace ContentDistributionPlayer.Components
 
                     _connectionOptions = new MqttClientOptionsBuilder()
                                     .WithClientId(_clientUid)
-                                    .WithWebSocketServer(brokerURL)
+                                    .WithWebSocketServer(options => options.WithUri(brokerURL))
                                     .WithCleanSession()
                                     .Build();
                 }

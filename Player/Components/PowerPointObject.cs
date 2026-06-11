@@ -100,11 +100,13 @@ namespace ContentDistributionPlayer.Components
         {
             try
             {
+                var beforePowerPointProcesses = DocumentsUtility.GetPowerPointProcessSnapshot();
                 _powerApp = new PowerPointApplication
                 {
                     DisplayAlerts = PpAlertLevel.ppAlertsNone,
                     Visible = Microsoft.Office.Core.MsoTriState.msoTrue
                 };
+                DocumentsUtility.TrackNewPowerPointProcesses(beforePowerPointProcesses);
 
                 complete?.Invoke();
             }

@@ -16,11 +16,44 @@ namespace ContentDistributionPlayer.Utilities
         private static string logFilePrefix = @"log";
         private static bool logRotation = true;
         private static int holdDays = 30;
+        private static SourceLevels _minimumLevel = SourceLevels.All;
 
         private static string _baseLogFolder;
         public static void Init(string baseLogFolder)
         {
             _baseLogFolder = baseLogFolder;
+        }
+
+        public static void SetMinimumLevel(string level)
+        {
+            switch ((level ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "critical":
+                    _minimumLevel = SourceLevels.Critical;
+                    break;
+                case "error":
+                    _minimumLevel = SourceLevels.Error;
+                    break;
+                case "warning":
+                    _minimumLevel = SourceLevels.Warning;
+                    break;
+                case "information":
+                case "info":
+                    _minimumLevel = SourceLevels.Information;
+                    break;
+                case "verbose":
+                    _minimumLevel = SourceLevels.Verbose;
+                    break;
+                case "off":
+                    _minimumLevel = SourceLevels.Off;
+                    break;
+                default:
+                    _minimumLevel = SourceLevels.All;
+                    break;
+            }
+
+            if (instance != null && instance._logTraceSource != null)
+                instance._logTraceSource.Switch.Level = _minimumLevel;
         }
 
         private static readonly object _instanceLock = new object();
@@ -44,7 +77,7 @@ namespace ContentDistributionPlayer.Utilities
                     // Initialize the log tracer
                     // The single string passed into the constructor here is the name of the trace source
                     newInstance._logTraceSource = new TraceSource(string.Format("Content Distribution v{0}", MainForm.APP_VERSION));
-                    newInstance._logTraceSource.Switch.Level = SourceLevels.All;
+                    newInstance._logTraceSource.Switch.Level = _minimumLevel;
 
                     // create the log folder if doesn't exist
                     string logPath = Path.Combine((string.IsNullOrEmpty(_baseLogFolder) ? AppDomain.CurrentDomain.BaseDirectory : _baseLogFolder), logFolder);

@@ -32,12 +32,15 @@ Tech stack: **C# / .NET Framework 4.8 / Windows Forms**. Windows-only.
 ├── JSON_communication_data.txt    ← protocol reference (MQTT / REST payload examples)
 ├── .gitignore
 ├── CLAUDE.md                      ← this file
+├── update-server/                 ← sample static auto-update manifest + instructions
 └── Player/                        ← the C# project
     ├── Player.csproj              ← OLD-STYLE csproj: every .cs is listed explicitly
     ├── App.config                 ← settings (host, room, monitor, contents folder, …)
     ├── packages.config            ← NuGet dependencies (classic restore)
     ├── Program.cs                 ← entry point
     ├── MainForm.cs / .Designer.cs / .resx
+    ├── SettingsForm.cs              ← runtime config editor opened with CTRL+G
+    ├── app.manifest                 ← DPI awareness / Windows execution manifest
     ├── Components/                ← domain logic
     ├── Controls/                  ← custom WinForms controls
     ├── Extensions/                ← helper extension methods
@@ -73,6 +76,8 @@ All code lives under [Player/](Player/).
 | [Player/Program.cs](Player/Program.cs) | `Main()` — runs `Application.Run(new MainForm())`. |
 | [Player/MainForm.cs](Player/MainForm.cs) | **God class (~1800 lines)**: config load, ESC hotkey, lifecycle, all RTC event handlers, cover handling, **display mode**, display-mode downloads, Windows scaling. |
 | [Player/MainForm.Designer.cs](Player/MainForm.Designer.cs) | Generated UI: `lblMessage`, `imgPreload`, `imgBackgroundLogo`, `imgPresentationBackground` (all `PictureBoxWithOpacity`), `panScenesContentsContainer`, `panLiveContentContainer`. |
+| [Player/SettingsForm.cs](Player/SettingsForm.cs) | Modal config editor opened with **CTRL+G**; edits the running `Player.exe.config` and requires restart for connection/window settings to take effect. |
+| [Player/app.manifest](Player/app.manifest) | Declares Per-Monitor DPI awareness so Windows display scaling does not bitmap-scale the player. |
 
 #### Components — domain logic
 | File | Role |
@@ -98,6 +103,10 @@ All code lives under [Player/](Player/).
 | [Player/Utilities/DocumentsUtility.cs](Player/Utilities/DocumentsUtility.cs) | File-type detection by extension; `KillAllOfficeProcesses()`. |
 | [Player/Utilities/ImageUtility.cs](Player/Utilities/ImageUtility.cs) | Image download; `LoadBitmapUnlocked()` (loads without locking the file on disk). |
 | [Player/Utilities/FileUtility.cs](Player/Utilities/FileUtility.cs) | Purges partial `*_downloading` files. |
+| [Player/Utilities/RemoteFileDownloader.cs](Player/Utilities/RemoteFileDownloader.cs) | Shared async downloader with partial-file suffix and atomic replace. |
+| [Player/Utilities/RuntimeSettingsService.cs](Player/Utilities/RuntimeSettingsService.cs) | Reads/writes the running `Player.exe.config` for the CTRL+G settings panel. |
+| [Player/Utilities/RuntimeStatusSnapshot.cs](Player/Utilities/RuntimeStatusSnapshot.cs) | Snapshot DTO for the CTRL+G health/status panel. |
+| [Player/Utilities/AutoUpdateService.cs](Player/Utilities/AutoUpdateService.cs) | Static-server auto-update checker/stager; downloads XML + ZIP, optional SHA256 verification, writes installer script. |
 | [Player/Utilities/WindowUtility.cs](Player/Utilities/WindowUtility.cs) | Win32 P/Invoke: `SetParent`, `MoveWindow`, `SetWindowLong`, cursor, default browser. |
 | [Player/Utilities/WebUtility.cs](Player/Utilities/WebUtility.cs) | Extracts `HttpStatusCode` from a `WebException`. |
 | [Player/Utilities/NumberUtility.cs](Player/Utilities/NumberUtility.cs) | `IsInt`/`IsFloat` using **`InvariantCulture`** (numbers come from JSON). |
@@ -108,13 +117,14 @@ All code lives under [Player/](Player/).
 | File | Role |
 |------|------|
 | [JSON_communication_data.txt](JSON_communication_data.txt) | Example JSON payloads exchanged with the NodeJS server / REST API. **Source of truth for the protocol.** |
+| [update-server/](update-server/) | Example static auto-update endpoint: `player-update.xml`, packaging scripts, and instructions for serving a release ZIP. |
 
 ---
 
 ## 4. Session flow
 
 1. **Startup** ([MainForm.cs](Player/MainForm.cs)): reads `Properties.Settings`, validates config,
-   kills stray Office processes, registers the **ESC** hotkey (quits the app), initializes VLC,
+   kills stray Office processes, registers app hotkeys on the current Win32 handle, initializes VLC,
    the `PresentationManager`, and `RealtimeCommunication`.
 2. **RTC connection**: shows the logo/messages, then `_rtc.Connect(...)` → MQTT to
    `<protocol>://<host>:<port>`. On connect the client subscribes to its topics and publishes
@@ -190,6 +200,9 @@ Settings live in [Player/App.config](Player/App.config) (section
 | `UseFullScreen` | bool | Borderless full screen |
 | `ScreenResolutionWidth/Height` | int | If `> 0` (and not full screen): borderless window of that size |
 | `PurgePresentationData` | bool | If `true`, deletes downloaded documents on unload |
+| `LogMinimumLevel` | string | Logger threshold: `All`, `Verbose`, `Information`, `Warning`, `Error`, `Critical`, `Off` |
+| `AutoUpdateEnabled` | bool | Enables update controls/configuration; the player does **not** check/install updates at startup |
+| `AutoUpdateManifestUrl` | string | URL of the static XML manifest used by the CTRL+G **Check for updates** button, e.g. `http://localhost:8080/player-update.xml` |
 
 > Always set `ContentsFolder`, `NodeJSHost`, `Room`, `Monitor` for the target machine. With bad
 > config the app shows an error `MessageBox` and exits.
@@ -257,14 +270,56 @@ For a **Debug** build, output is in `Player\bin\Debug\`.
    waits for the controller to init a presentation.
 5. Press **ESC** to quit.
 
-### 8.2 Deploy to another PC
+Runtime shortcuts:
+- **ESC** quits the player.
+- **CTRL+H** toggles always-on-top.
+- **CTRL+G** opens the settings + health/status modal for the running `Player.exe.config`.
+
+### 8.2 Static auto-update
+The player can update from a plain static server, but update checks are **manual only** from the
+CTRL+G control panel. Point `AutoUpdateManifestUrl` to an XML file like
+[update-server/player-update.xml](update-server/player-update.xml), then press **Check for updates**:
+
+```xml
+<update>
+  <version>1.0.1</version>
+  <zipUrl>http://localhost:8080/Player-1.0.1.zip</zipUrl>
+  <sha256></sha256>
+</update>
+```
+
+The manifest `<version>` is compared with `MainForm.APP_VERSION`, not with the Windows file-version
+metadata of `Player.exe`. The current `MainForm.APP_VERSION` is shown in the CTRL+G panel.
+
+To prepare a local static-server release:
+
+```bat
+update-server\build-update-package.cmd 1.0.1
+```
+
+The script zips the contents of `Player/bin/Release/` as `Player-<version>.zip`, calculates SHA256,
+and updates `player-update.xml`.
+If the repo drive has little free space, pass an output folder to use as the static-server root:
+
+```bat
+update-server\build-update-package.cmd 1.0.1 D:\ContentDistribution-player-update-server
+```
+
+The ZIP must contain the **contents** of `Player/bin/Release/`, not an extra parent folder. If the
+manifest version is newer than `MainForm.APP_VERSION`, the control panel downloads the ZIP under
+`ContentsFolder/updates/<version>/`, verifies `sha256` when present, extracts it, writes
+`install-update.cmd`, and asks whether to install. If confirmed, the player starts that script and
+exits. The script waits for the current `Player.exe` PID to end, copies the staged package over the
+app folder, and restarts `Player.exe`.
+
+### 8.3 Deploy to another PC
 - Copy the **entire** `Player\bin\Release\` folder (not just the `.exe`) — it contains the CEF and
   libvlc native files.
 - The target PC needs: **.NET Framework 4.8 runtime**, **Microsoft PowerPoint**, and the
   **Visual C++ Redistributable** (for CEF).
 - Edit `Player.exe.config` as in step 8.1 before first launch.
 
-### 8.3 Troubleshooting
+### 8.4 Troubleshooting
 | Symptom | Cause / fix |
 |---------|-------------|
 | Build error: *"references NuGet package(s) that are missing"* | Run `nuget restore Player.sln` (section 7.2). |
@@ -283,11 +338,14 @@ For a **Debug** build, output is in `Player\bin\Debug\`.
 - **JSON access** always via `JObject.Get<T>(...)` (null-safe).
 - **Numeric parsing** always with `InvariantCulture` (numbers come from JSON): never parse `bounds` with the current culture.
 - **Image loading** always via `ImageUtility.LoadBitmapUnlocked(...)` (never `Image.FromFile`, which locks the file on disk).
-- **Threading/UI**: MQTT callbacks and `WebClient` events run off the UI thread → use `Invoke`/`BeginInvoke` on `MainContainer`/`SceneContainer`. Keep doing so.
+- **Downloads** use `RemoteFileDownloader` for presentation files, display-mode resources, images, and auto-update packages. It writes `*_downloading` partials and replaces the final file only after a complete download.
+- **Threading/UI**: MQTT callbacks and async download continuations run off the UI thread → use `Invoke`/`BeginInvoke` on `MainContainer`/`SceneContainer`. Keep doing so.
 - **`APP_VERSION`** (`MainForm.APP_VERSION = "1.0.0"`): the server compares it and may reply `app-need-update`. **Do not change it** without coordinating with the server.
-- **Office**: `DocumentsUtility.KillAllOfficeProcesses()` is called before start/teardown to avoid zombie PowerPoint instances. Release COM objects with `Marshal.ReleaseComObject`.
-- **Hotkeys**: only **ESC** (quits). The others are commented out.
+- **Office**: PowerPoint instances created by this app are tracked by process id. `DocumentsUtility.KillAllOfficeProcesses()` keeps its legacy name but only terminates those tracked PowerPoint processes, avoiding unrelated user presentations. Release COM objects with `Marshal.ReleaseComObject`.
+- **Hotkeys**: **ESC** quits, **CTRL+H** toggles always-on-top, **CTRL+G** opens the runtime settings modal. Hotkeys are registered in `OnHandleCreated` and unregistered in `OnHandleDestroyed` because changing border/fullscreen style can recreate the form handle.
 - **OLD-STYLE `.csproj`**: every `.cs` file is listed explicitly in `<Compile Include>`. **If you add/remove a file you must update [Player/Player.csproj](Player/Player.csproj)**, otherwise the build silently diverges.
+- **DPI / Windows Scale**: the app uses `app.manifest` + early process DPI awareness in `Program.Main()` to avoid Windows bitmap-scaling the player when System → Display scale is changed. Keep this if presentation quality matters.
+- **Auto-update**: checks are manual from the CTRL+G panel; never install updates automatically at startup. Keep the static manifest format in sync with `AutoUpdateService`. Bump `MainForm.APP_VERSION` only together with a release ZIP and manifest update.
 - **WinForms resources** (logo, preloader) live in [Player/Properties/Resources.resx](Player/Properties/Resources.resx) and are referenced via `Properties.Resources.<key>`. To swap the logo: drop the new PNG in `Player/Resources/`, point the `logo` entry in `Resources.resx` at it, and keep `Resources.Designer.cs` + `MainForm.Designer.cs` (`Properties.Resources.logo`) in sync.
 - UI language is English; comments/logs are mixed Italian/English.
 
@@ -303,7 +361,7 @@ For a **Debug** build, output is in `Player\bin\Debug\`.
   publish commands. Adding auth/TLS requires coordination with the NodeJS server.
 - **Secrets in `App.config`**: the real host and a local path are committed. They should be
   externalized and scrubbed from history.
-- **Plain-HTTP downloads** are allowed: downloaded files are opened/executed without integrity checks.
+- **Plain-HTTP downloads** are allowed for content and update packages. Auto-update supports optional SHA256 verification in the XML manifest; use it for real deployments.
 
 ---
 
@@ -311,10 +369,10 @@ For a **Debug** build, output is in `Player\bin\Debug\`.
 
 - **Pervasive `async void`** (RTC handlers, `Connect`, `Reconnect`): exceptions are unobservable. Be careful when editing.
 - **`PowerPointObject.SendPowerPointCommand`** uses `Task.Run(...).Wait(5s)` with COM STA: can block the UI; fragile flow.
-- **PowerPoint COM leaks**: not every intermediate COM object is released (mitigated by `KillAllOfficeProcesses`).
+- **PowerPoint COM leaks**: not every intermediate COM object is released (mitigated by tracked PowerPoint process cleanup).
 - **One `LibVLC` per video** (`ControlObjectElement`): heavy; usually a single shared instance is used.
 - **`PublishMessage` uses `WithRetainFlag()` on everything**: even transient events (`scene-changed`, `download-*`) are *retained* → a late subscriber can receive stale state. Revisit if you touch the protocol.
-- **Download logic is duplicated** (in `PresentationManager`, `MainForm`, `ImageUtility`): a good candidate to extract into one shared downloader.
+- **Auto-update install is script-based**: the app cannot overwrite its own running executable, so update installation is delegated to `install-update.cmd` after the player exits.
 - **`URLSecurityZoneAPI.cs`** is dead code (legacy IE WebBrowser); kept in the build to avoid touching the `.csproj`.
 - **`WindowsScaleFactor`** is computed but never used.
 - An orphaned `Player/Resources/accenture_logo.png` may remain on disk after the logo was switched to `logo.png`; it is no longer referenced and can be deleted.
@@ -328,3 +386,10 @@ static `HttpClient`; images loaded without file locks + disposed; thread-safe `L
 rotation; `RandomString` off-by-one fix and bounded retry in `PublishMessage`; operator-precedence fix
 in `DocumentsUtility.GetDocumentTypeByFileName`; backwards control removal in `SceneManager`; HDC/Graphics
 release in `GetWindowsScalingFactor`. The startup logo was switched from `accenture_logo.png` to `logo.png`.
+The logo is fitted with preserved aspect ratio, app hotkeys now survive handle recreation, **CTRL+H**
+toggles topmost, **CTRL+G** opens a runtime `Player.exe.config` editor, MQTT payload handling catches malformed JSON,
+and the app declares Per-Monitor DPI awareness to preserve presentation sharpness under Windows display scaling.
+Downloads are centralized through `RemoteFileDownloader`, PowerPoint cleanup now targets only processes created
+by this player, logging has a configurable threshold, the CTRL+G modal includes a runtime health/status panel,
+and a static-server auto-update flow can download an XML manifest + release ZIP, verify SHA256, stage the package,
+run an installer script, and restart the player.

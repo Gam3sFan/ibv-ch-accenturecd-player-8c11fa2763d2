@@ -17,6 +17,7 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Policy;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Transitions;
@@ -35,6 +36,7 @@ namespace ContentDistributionPlayer
         private int _currentMonitor;
         private bool _useFullScreen = false;
         private bool _hideMouseAndTopMostWin = false;
+        private bool _topMostEnabled = false;
         private bool _purgePresentationData = true;
         private string _contentsFolder;
 
@@ -62,6 +64,10 @@ namespace ContentDistributionPlayer
 
 
         private const int ESC_HOTKEY_ID = 1;
+        private const int TOGGLE_TOPMOST_HOTKEY_ID = 2;
+        private const int SETTINGS_HOTKEY_ID = 3;
+        private const int HOTKEY_MOD_CONTROL = 2;
+        private bool _hotkeysRegistered = false;
         /*private const int LEFT_HOTKEY_ID = 2;
         private const int RIGHT_HOTKEY_ID = 3;
         private const int UP_HOTKEY_ID = 4;
@@ -97,6 +103,7 @@ namespace ContentDistributionPlayer
 
         #region UI elements
         private InfoMessage _infoMessage;
+        private AutoUpdateService _autoUpdateService = new AutoUpdateService();
         #endregion
 
         #region Presentation data
@@ -122,7 +129,7 @@ namespace ContentDistributionPlayer
             FILE = 1,
             SCREEN_SHARE = 2,
         }
-        WebClient _currentDisplayModeClientDownload;
+        CancellationTokenSource _currentDisplayModeClientDownload;
         string _currentDisplayModeResourceLocalFile;
         string _currentDisplayModeResourceFileName;
         #endregion
@@ -192,6 +199,7 @@ namespace ContentDistributionPlayer
             {
                 _hideMouseAndTopMostWin = true;
             }
+            _topMostEnabled = _hideMouseAndTopMostWin;
             
             _contentsFolder = Properties.Settings.Default.ContentsFolder;
             _purgePresentationData = Properties.Settings.Default.PurgePresentationData;
@@ -232,6 +240,7 @@ namespace ContentDistributionPlayer
                 else
                 {
                     LogTracer.Init(_contentsFolder);
+                    LogTracer.SetMinimumLevel(Properties.Settings.Default.LogMinimumLevel);
                     LogTracer.Instance.Trace("Starting application");
                 }
             }
@@ -250,18 +259,6 @@ namespace ContentDistributionPlayer
                     return;
                 }
             }
-
-
-            // register the hot keys to control the presentation: this features will be used for demo purposes (only the ESC key is needed)
-            //Modifier keys codes: Alt = 1, Ctrl = 2, Shift = 4, Win = 8
-            //Compute the addition of each combination of the keys you want to be pressed
-            //ALT+CTRL = 1 + 2 = 3 , CTRL+SHIFT = 2 + 4 = 6...
-            RegisterHotKey(this.Handle, ESC_HOTKEY_ID, 0, (int)Keys.Escape);
-            /*RegisterHotKey(this.Handle, LEFT_HOTKEY_ID, 0, (int)Keys.Left);
-            RegisterHotKey(this.Handle, RIGHT_HOTKEY_ID, 0, (int)Keys.Right);
-            RegisterHotKey(this.Handle, UP_HOTKEY_ID, 0, (int)Keys.Up);
-            RegisterHotKey(this.Handle, DOWN_HOTKEY_ID, 0, (int)Keys.Down);
-            RegisterHotKey(this.Handle, ENTER_HOTKEY_ID, 0, (int)Keys.Enter);*/
 
 
             // set the UI elements  
@@ -298,7 +295,6 @@ namespace ContentDistributionPlayer
 
             PresentationManagerInitialize();
 
-
             // init the RTC
             _rtc = new RealtimeCommunication(_nodeJSServerHost, _nodeJSServerPort, _nodeJSServerProtocol, _currentRoom, _currentMonitor);
             _rtc.OnConnectionError += OnRealtimeCommunicationConnectionError;
@@ -331,8 +327,7 @@ namespace ContentDistributionPlayer
             if (_hideMouseAndTopMostWin)
             {
                 // show the app in foreground (above all)
-                this.TopMost = true;
-                this.BringToFront();
+                ApplyTopMostState(true);
             }
 
             if (_useFullScreen) 
@@ -420,12 +415,7 @@ namespace ContentDistributionPlayer
             LogTracer.Instance.Trace(string.Format("Quit application - room: {0}   monitor: {1}", _currentRoom, _currentMonitor));
 
             // unregister all the hot keys
-            UnregisterHotKey(this.Handle, ESC_HOTKEY_ID);
-            /*UnregisterHotKey(this.Handle, LEFT_HOTKEY_ID);
-            UnregisterHotKey(this.Handle, RIGHT_HOTKEY_ID);
-            UnregisterHotKey(this.Handle, UP_HOTKEY_ID);
-            UnregisterHotKey(this.Handle, DOWN_HOTKEY_ID);
-            UnregisterHotKey(this.Handle, ENTER_HOTKEY_ID);*/
+            UnregisterApplicationHotkeys();
 
 
             // Close the RTC client
@@ -500,10 +490,18 @@ namespace ContentDistributionPlayer
             try
             {
                 // adjust the background logo image
+                Size sourceLogoSize = Properties.Resources.logo.Size;
                 float logoPercW = 0.4f;
+                float logoPercH = 0.3f;
                 float logoPercTopOffset = 0.1f;
-                imgBackgroundLogo.Width = (int)(ClientRectangle.Width * logoPercW);
-                imgBackgroundLogo.Height = imgBackgroundLogo.Width;
+                float logoScale = Math.Min(
+                    1f,
+                    Math.Min(
+                        (ClientRectangle.Width * logoPercW) / sourceLogoSize.Width,
+                        (ClientRectangle.Height * logoPercH) / sourceLogoSize.Height));
+                imgBackgroundLogo.Size = new Size(
+                    (int)(sourceLogoSize.Width * logoScale),
+                    (int)(sourceLogoSize.Height * logoScale));
                 imgBackgroundLogo.Left = (ClientRectangle.Width - imgBackgroundLogo.Width) / 2;
                 imgBackgroundLogo.Top = (ClientRectangle.Height - imgBackgroundLogo.Height) / 2 - (int)(ClientRectangle.Height * logoPercTopOffset);
 
@@ -580,6 +578,65 @@ namespace ContentDistributionPlayer
 
 
         #region Keyboard interceptor
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            RegisterApplicationHotkeys();
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            UnregisterApplicationHotkeys();
+            base.OnHandleDestroyed(e);
+        }
+
+        private void RegisterApplicationHotkeys()
+        {
+            if (_hotkeysRegistered || !IsHandleCreated)
+                return;
+
+            // Modifier keys codes: Alt = 1, Ctrl = 2, Shift = 4, Win = 8.
+            bool escRegistered = RegisterHotKey(this.Handle, ESC_HOTKEY_ID, 0, (int)Keys.Escape);
+            bool topMostRegistered = RegisterHotKey(this.Handle, TOGGLE_TOPMOST_HOTKEY_ID, HOTKEY_MOD_CONTROL, (int)Keys.H);
+            bool settingsRegistered = RegisterHotKey(this.Handle, SETTINGS_HOTKEY_ID, HOTKEY_MOD_CONTROL, (int)Keys.G);
+            _hotkeysRegistered = true;
+
+            if (!escRegistered || !topMostRegistered || !settingsRegistered)
+            {
+                LogTracer.Instance.Trace(
+                    string.Format("Hotkey registration status - ESC: {0}, CTRL+H: {1}, CTRL+G: {2}", escRegistered, topMostRegistered, settingsRegistered),
+                    TraceEventType.Warning);
+            }
+        }
+
+        private void UnregisterApplicationHotkeys()
+        {
+            if (!_hotkeysRegistered || !IsHandleCreated)
+                return;
+
+            UnregisterHotKey(this.Handle, ESC_HOTKEY_ID);
+            UnregisterHotKey(this.Handle, TOGGLE_TOPMOST_HOTKEY_ID);
+            UnregisterHotKey(this.Handle, SETTINGS_HOTKEY_ID);
+            _hotkeysRegistered = false;
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.H))
+            {
+                ToggleTopMost();
+                return true;
+            }
+
+            if (keyData == (Keys.Control | Keys.G))
+            {
+                ShowSettingsPanel();
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
         protected override void WndProc(ref Message m)
         {
             if (m.Msg == 0x0312)
@@ -588,11 +645,86 @@ namespace ContentDistributionPlayer
                 {
                     QuitApp();
                 }
+                else if (m.WParam.ToInt32() == TOGGLE_TOPMOST_HOTKEY_ID)
+                {
+                    ToggleTopMost();
+                }
+                else if (m.WParam.ToInt32() == SETTINGS_HOTKEY_ID)
+                {
+                    ShowSettingsPanel();
+                }
             }
 
             base.WndProc(ref m);
         }
         #endregion
+
+        private void ToggleTopMost()
+        {
+            _topMostEnabled = !_topMostEnabled;
+            ApplyTopMostState(_topMostEnabled);
+            LogTracer.Instance.Trace(string.Format("TopMost toggled: {0}", _topMostEnabled));
+        }
+
+        private void ApplyTopMostState(bool enabled)
+        {
+            TopMost = enabled;
+            if (enabled)
+                BringToFront();
+        }
+
+        private void ShowSettingsPanel()
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(ShowSettingsPanel));
+                return;
+            }
+
+            using (var form = new SettingsForm(CreateRuntimeStatusSnapshot(), _autoUpdateService, InstallStagedUpdate))
+            {
+                LogTracer.Instance.Trace("Settings panel opened");
+                bool wasTopMost = TopMost;
+                TopMost = false;
+                try
+                {
+                    if (form.ShowDialog(this) == DialogResult.OK)
+                    {
+                        LogTracer.Instance.Trace("Settings panel saved Player.exe.config");
+                        MessageBox.Show(
+                            "Settings saved. Restart the player to apply connection, room, monitor and window changes.",
+                            "Settings saved",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                    }
+                }
+                finally
+                {
+                    ApplyTopMostState(_topMostEnabled && wasTopMost);
+                }
+            }
+        }
+
+        private RuntimeStatusSnapshot CreateRuntimeStatusSnapshot()
+        {
+            return new RuntimeStatusSnapshot
+            {
+                AppVersion = APP_VERSION,
+                ConfigPath = AppDomain.CurrentDomain.SetupInformation.ConfigurationFile,
+                ContentsFolder = _contentsFolder,
+                NodeEndpoint = string.Format("{0}://{1}:{2}", _nodeJSServerProtocol, _nodeJSServerHost, _nodeJSServerPort),
+                ApiUri = APIService.API_URI ?? "",
+                ClientIdentity = string.Format("R{0}_M{1}", _currentRoom, _currentMonitor),
+                TopMostEnabled = _topMostEnabled,
+                RtcConnected = _rtc != null && _rtc.IsConnected,
+                PresentationId = _presentationId,
+                SceneIndex = _presentationManager != null ? _presentationManager.GetCurrentSceneIndex() : -1,
+                SubSceneIndex = _presentationManager != null ? _presentationManager.GetCurrentSubSceneIndex() : -1,
+                WindowsScaleFactor = WindowsScaleFactor,
+                DpiAwareness = "PerMonitorAware",
+                AutoUpdateState = _autoUpdateService != null ? _autoUpdateService.LastState : "Unavailable"
+            };
+        }
 
 
         #region Realtime Communications functions
@@ -1091,8 +1223,10 @@ namespace ContentDistributionPlayer
                 // check if the resource is a PawerPoint so we can start the presentation directly
                 if (DocumentsUtility.IsPowerPoint(localResourcePath))
                 {
+                    var beforePowerPointProcesses = DocumentsUtility.GetPowerPointProcessSnapshot();
                     _displayModePowerPointApp = new Microsoft.Office.Interop.PowerPoint.Application();
                     _displayModePowerPointApp.Visible = MsoTriState.msoTrue;
+                    DocumentsUtility.TrackNewPowerPointProcesses(beforePowerPointProcesses);
                     Presentations ppPresens = _displayModePowerPointApp.Presentations;
 
                     _displayModePowerPointPresentation = ppPresens.Open(localResourcePath, MsoTriState.msoFalse, MsoTriState.msoTrue, MsoTriState.msoTrue);
@@ -1169,9 +1303,7 @@ namespace ContentDistributionPlayer
         private async void DownloadFileFromUrl(string commandString, JObject resourceData = null)
         {
             StopCurrentDisplayModeClientDownload();
-            _currentDisplayModeClientDownload = new WebClient();
-            _currentDisplayModeClientDownload.DownloadFileCompleted += CurrentDisplayModeClientDownload_DownloadFileCompleted;
-
+            _currentDisplayModeClientDownload = new CancellationTokenSource();
 
             string errorMsg = null;
 
@@ -1225,144 +1357,33 @@ namespace ContentDistributionPlayer
                 _currentDisplayModeResourceLocalFile = Path.Combine(displayModeTempPath, fileNameOnly);
 
                 // if the local file already exists it will not download again (if the version number is the same)
-                if (!File.Exists(_currentDisplayModeResourceLocalFile))
+                try
                 {
-                    LogTracer.Instance.Trace(string.Format("Download process started for {0}", commandString));
-
-                    try
-                    {
-                        // trying to download locally 
-                        _currentDisplayModeClientDownload.DownloadFileAsync(new Uri(commandString), _currentDisplayModeResourceLocalFile + FileUtility.DOWNLOADING_FILE_POSTFIX);
-                    }
-                    catch (Exception ex)
-                    {
-
-                        // send the info that the resource download ended
-                        await _rtc.PresentationDownloadEndedAsync();
-
-                        if (_currentDisplayModeClientDownload == null)
-                        {
-                            // this situation is true when the room controller unload the room while the client is downloading the presentation data
-                            StopCurrentDisplayModeClientDownload();
-                        }
-                        else
-                        {
-                            // error downloading remote file
-                            errorMsg = string.Format(@"Error downloading the remote file {0} - {1}", commandString, ex.Message);
-                            LogTracer.Instance.Trace(errorMsg, System.Diagnostics.TraceEventType.Error);
-
-                            StopCurrentDisplayModeClientDownload();
-
-                            // send the error to the director
-                            await _rtc.PresentationErrorAsync(_presentationManager.GetCurrentSceneIndex(), _presentationManager.GetCurrentSubSceneIndex(), RealtimeCommunication.ERR_CODE_DISPLAY_MODE_ERROR, errorMsg);
-                        }
-                    }
-                    return;
-                }
-                else
-                {
-                    LogTracer.Instance.Trace(string.Format("A local file version of the document already exists ({0}) and it will not download again", _currentDisplayModeResourceLocalFile));
-
-                    // continue opening the downloaded resource outside the player client
+                    await RemoteFileDownloader.DownloadAsync(commandString, _currentDisplayModeResourceLocalFile, false, _currentDisplayModeClientDownload.Token);
+                    await _rtc.PresentationDownloadEndedAsync();
                     DisplayModeOpenLocalResourceWithAssociatedProgram(_currentDisplayModeResourceLocalFile);
-                    StopCurrentDisplayModeClientDownload();
                 }
-            }
-        }
-
-        private void CurrentDisplayModeClientDownload_DownloadFileCompleted(object sender, System.ComponentModel.AsyncCompletedEventArgs e)
-        {
-            this.Invoke(new Action(async () =>
-            {
-                // send the info that the resource download ended
-                await _rtc.PresentationDownloadEndedAsync();
-
-                if (e.Error != null)
+                catch (OperationCanceledException)
                 {
-                    HttpStatusCode httpStatusCode = Utilities.WebUtility.GetHttpStatusCode(e.Error);
-                    string errorMsg = @"Error downloading the the remote file";
-                    LogTracer.Instance.Trace(string.Format("{0} '{1}' - {2}", errorMsg, _currentDisplayModeResourceFileName, e.Error.Message), System.Diagnostics.TraceEventType.Error);
-
-                    // send the error to the director
+                    await _rtc.PresentationDownloadEndedAsync();
+                }
+                catch (Exception ex)
+                {
+                    await _rtc.PresentationDownloadEndedAsync();
+                    errorMsg = string.Format(@"Error downloading the remote file {0} - {1}", commandString, ex.Message);
+                    LogTracer.Instance.Trace(errorMsg, TraceEventType.Error);
                     await _rtc.PresentationErrorAsync(_presentationManager.GetCurrentSceneIndex(), _presentationManager.GetCurrentSubSceneIndex(), RealtimeCommunication.ERR_CODE_DISPLAY_MODE_ERROR, errorMsg);
-
-                    StopCurrentDisplayModeClientDownload();
-                    return;
                 }
-                else
-                {
-                    if (_currentDisplayModeResourceLocalFile == null)
-                    {
-                        string errorMsg = @"Unable to find the downloaded resource in the local file system";
-                        LogTracer.Instance.Trace(string.Format("{0} '{1}' - {2}", errorMsg, _currentDisplayModeResourceFileName, e.Error.Message), System.Diagnostics.TraceEventType.Error);
 
-                        // send the error to the director
-                        await _rtc.PresentationErrorAsync(_presentationManager.GetCurrentSceneIndex(), _presentationManager.GetCurrentSubSceneIndex(), RealtimeCommunication.ERR_CODE_DISPLAY_MODE_ERROR, errorMsg);
-
-                        StopCurrentDisplayModeClientDownload();
-                        return;
-                    }
-
-                    if (!e.Cancelled)
-                    {
-                        // Downloaded OK
-                        string errorMsg;
-
-                        if (!File.Exists(_currentDisplayModeResourceLocalFile + FileUtility.DOWNLOADING_FILE_POSTFIX))
-                        {
-                            errorMsg = @"Unable to find the downloaded file";
-                            LogTracer.Instance.Trace(string.Format("{0} {1}", errorMsg, _currentDisplayModeResourceLocalFile + FileUtility.DOWNLOADING_FILE_POSTFIX), TraceEventType.Error);
-
-                            // send the error to the director
-                            await _rtc.PresentationErrorAsync(_presentationManager.GetCurrentSceneIndex(), _presentationManager.GetCurrentSubSceneIndex(), RealtimeCommunication.ERR_CODE_DISPLAY_MODE_ERROR, errorMsg);
-
-                            StopCurrentDisplayModeClientDownload();
-                            return;
-                        }
-
-                        // rename the file downloaded
-                        File.Move(_currentDisplayModeResourceLocalFile + FileUtility.DOWNLOADING_FILE_POSTFIX, _currentDisplayModeResourceLocalFile);
-
-
-                        // check if the download worked fine
-                        if (!File.Exists(_currentDisplayModeResourceLocalFile))
-                        {
-                            errorMsg = @"Unable to download the file locally";
-                            LogTracer.Instance.Trace(string.Format("{0} {1}", errorMsg, _currentDisplayModeResourceFileName), System.Diagnostics.TraceEventType.Error);
-
-                            // send the error to the director
-                            await _rtc.PresentationErrorAsync(_presentationManager.GetCurrentSceneIndex(), _presentationManager.GetCurrentSubSceneIndex(), RealtimeCommunication.ERR_CODE_DISPLAY_MODE_ERROR, errorMsg);
-
-                            StopCurrentDisplayModeClientDownload();
-                            return;
-                        }
-
-                        // continue opening the downloaded resource outside the player client
-                        DisplayModeOpenLocalResourceWithAssociatedProgram(_currentDisplayModeResourceLocalFile);
-
-                        StopCurrentDisplayModeClientDownload();
-                    }
-                    else
-                    {
-                        // this situation is true when the room controller unload the room while the client is downloading the presentation data
-                        StopCurrentDisplayModeClientDownload();
-                    }
-                }
-            }));
+                StopCurrentDisplayModeClientDownload();
+            }
         }
 
         private void StopCurrentDisplayModeClientDownload()
         {
             if (_currentDisplayModeClientDownload != null)
             {
-                if (_currentDisplayModeClientDownload.IsBusy)
-                {
-                    // send the info that the resource download ended
-                    _ = _rtc.PresentationDownloadEndedAsync();
-
-                    _currentDisplayModeClientDownload.CancelAsync();
-                }
-                _currentDisplayModeClientDownload.DownloadFileCompleted -= CurrentDisplayModeClientDownload_DownloadFileCompleted;
+                _currentDisplayModeClientDownload.Cancel();
                 _currentDisplayModeClientDownload.Dispose();
             }
             _currentDisplayModeClientDownload = null;
@@ -1372,15 +1393,17 @@ namespace ContentDistributionPlayer
 
         private async Task OnRealtimeCommunicationClientDisplayModeStop()
         {
-            if (this.Disposing)
+            if (this.Disposing || this.IsDisposed)
                 return;
 
             // put the player in foreground
-            this.BeginInvoke(new MethodInvoker(delegate
+            if (this.IsHandleCreated)
             {
-                this.TopMost = true;
-                this.BringToFront();
-            }));
+                this.BeginInvoke(new MethodInvoker(delegate
+                {
+                    ApplyTopMostState(_topMostEnabled);
+                }));
+            }
 
             try
             {
@@ -1396,18 +1419,28 @@ namespace ContentDistributionPlayer
 
                 TaskCompletionSource<bool> closeShareScreenTask = new TaskCompletionSource<bool>();
                 // close the sharescreen if it was opened before
-                _ = this.Invoke(new Action(async () =>
+                if (!this.IsHandleCreated)
                 {
-                    if (_forceUpdateVersion)
-                        return;
-
-                    await _infoMessage.HideMessage();
-
-                    LogTracer.Instance.Trace("Unload the live content");
-
-                    _presentationManager.UnloadLiveContent(true);
                     closeShareScreenTask.SetResult(true);
-                }));
+                }
+                else
+                {
+                    _ = this.Invoke(new Action(async () =>
+                    {
+                        if (_forceUpdateVersion)
+                        {
+                            closeShareScreenTask.SetResult(true);
+                            return;
+                        }
+
+                        await _infoMessage.HideMessage();
+
+                        LogTracer.Instance.Trace("Unload the live content");
+
+                        _presentationManager.UnloadLiveContent(true);
+                        closeShareScreenTask.SetResult(true);
+                    }));
+                }
 
                 await closeShareScreenTask.Task;
             }
@@ -1434,6 +1467,38 @@ namespace ContentDistributionPlayer
             _presentationManager.OnDownloadLiveContent += OnPresentationManagerDownloadLiveContent;
             _presentationManager.OnLoadContentLiveContent += OnPresentationManagerLoadContentLiveContent;
             _presentationManager.OnShowCover += OnPresentationManagerShowCover;
+        }
+
+        private void InstallStagedUpdate(string installScriptPath)
+        {
+            if (string.IsNullOrWhiteSpace(installScriptPath))
+                return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() => InstallStagedUpdate(installScriptPath)));
+                return;
+            }
+
+            try
+            {
+                LogTracer.Instance.Trace("Auto-update install script launched: " + installScriptPath);
+                Process.Start(new ProcessStartInfo(installScriptPath)
+                {
+                    UseShellExecute = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                });
+                QuitApp();
+            }
+            catch (Exception ex)
+            {
+                LogTracer.Instance.Trace("Unable to launch auto-update script: " + ex.Message, TraceEventType.Error);
+                MessageBox.Show(
+                    "Unable to launch the update installer: " + ex.Message,
+                    "Update error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         }
 
         private void ShowCover(JObject result, Action completed)
@@ -1824,9 +1889,11 @@ namespace ContentDistributionPlayer
 
         private void MainForm_Activated(object sender, EventArgs e)
         {
-            // show the app in foreground (above all)
-            this.TopMost = true;
-            this.BringToFront();
+            if (_topMostEnabled)
+            {
+                // show the app in foreground (above all)
+                ApplyTopMostState(true);
+            }
         }
     }
 }

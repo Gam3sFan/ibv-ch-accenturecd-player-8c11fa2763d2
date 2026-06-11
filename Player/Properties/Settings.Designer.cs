@@ -43,7 +43,7 @@ namespace ContentDistributionPlayer.Properties {
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("1")]
+        [global::System.Configuration.DefaultSettingValueAttribute("14")]
         public int Room {
             get {
                 return ((int)(this["Room"]));
@@ -52,7 +52,7 @@ namespace ContentDistributionPlayer.Properties {
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("1")]
+        [global::System.Configuration.DefaultSettingValueAttribute("3")]
         public int Monitor {
             get {
                 return ((int)(this["Monitor"]));
@@ -61,7 +61,7 @@ namespace ContentDistributionPlayer.Properties {
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("8086")]
+        [global::System.Configuration.DefaultSettingValueAttribute("9003")]
         public int NodeJSPort {
             get {
                 return ((int)(this["NodeJSPort"]));
@@ -97,7 +97,7 @@ namespace ContentDistributionPlayer.Properties {
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("accenture.alunni.biz")]
+        [global::System.Configuration.DefaultSettingValueAttribute("acin.cd.accenture.com")]
         public string NodeJSHost {
             get {
                 return ((string)(this["NodeJSHost"]));
@@ -106,10 +106,37 @@ namespace ContentDistributionPlayer.Properties {
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("C:\\Users\\tibof\\Documents\\Accenture")]
+        [global::System.Configuration.DefaultSettingValueAttribute("C:\\Users\\Utente\\Documents\\Accenture")]
         public string ContentsFolder {
             get {
                 return ((string)(this["ContentsFolder"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Information")]
+        public string LogMinimumLevel {
+            get {
+                return ((string)(this["LogMinimumLevel"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool AutoUpdateEnabled {
+            get {
+                return ((bool)(this["AutoUpdateEnabled"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("http://localhost:8080/player-update.xml")]
+        public string AutoUpdateManifestUrl {
+            get {
+                return ((string)(this["AutoUpdateManifestUrl"]));
             }
         }
     }

@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Transitions;
@@ -50,7 +51,7 @@ namespace ContentDistributionPlayer.Components
         
         private bool _isGotoSceneInProgress = false;
 
-        private WebClient _currentClientDownload = null;
+        private CancellationTokenSource _currentDownloadCancellation = null;
         private int _currentFileDataIndex;
         private FileData[] _currentFileDatas;
         private bool _isCurrentDownloadFromLiveContent;
@@ -343,15 +344,14 @@ namespace ContentDistributionPlayer.Components
         public void DownloadRemoteFiles(FileData[] fileDatas, bool isLiveContent, PM_EventSucces successCallback, PM_EventError errorCallback)
         {
             StopCurrentClientDownload();
-            _currentClientDownload = new WebClient();
-            _currentClientDownload.DownloadFileCompleted += CurrentClientDownload_DownloadFileCompleted;
+            _currentDownloadCancellation = new CancellationTokenSource();
             _currentFileDataIndex = 0;
             _currentFileDatas = fileDatas;
             _isCurrentDownloadFromLiveContent = isLiveContent;
             _fileDownloadSuccessCallback = successCallback;
             _fileDownloadErrorCallback = errorCallback;
 
-            DownloadNextFile();
+            _ = DownloadRemoteFilesAsync();
         }
 
         private void ResetDownloadFileVariables()
@@ -364,110 +364,51 @@ namespace ContentDistributionPlayer.Components
             _fileDownloadErrorCallback = null;
         }
 
-        private void CurrentClientDownload_DownloadFileCompleted(object sender, System.ComponentModel.AsyncCompletedEventArgs e)
+        private async Task DownloadRemoteFilesAsync()
         {
-            MainContainer.Invoke(new Action(() =>
+            try
             {
-                FileData fileData = _currentFileDatas[_currentFileDataIndex];
-
-                if (e.Error != null)
+                while (_currentFileDatas != null && _currentFileDataIndex >= 0 && _currentFileDataIndex < _currentFileDatas.Length)
                 {
-                    HttpStatusCode httpStatusCode = Utilities.WebUtility.GetHttpStatusCode(e.Error);
-                    string errorMsg = @"Error downloading the the remote file";
-                    LogTracer.Instance.Trace(string.Format("{0} '{1}' to the scene JSON data - presentation {2}: {3}", errorMsg, fileData.FileName, _presentation.Get<int>("id"), e.Error.Message), System.Diagnostics.TraceEventType.Error);
+                    if (_currentDownloadCancellation == null || _currentDownloadCancellation.IsCancellationRequested)
+                        throw new OperationCanceledException();
+
+                    await DownloadNextFileAsync();
+                }
+
+                IsUnloaded = false;
+                PM_EventSucces successCallback = _fileDownloadSuccessCallback;
+                MainContainer.BeginInvoke(new Action(() => successCallback?.Invoke()));
+                ResetDownloadFileVariables();
+            }
+            catch (OperationCanceledException)
+            {
+                PM_EventSucces successCallback = _fileDownloadSuccessCallback;
+                MainContainer.BeginInvoke(new Action(() => successCallback?.Invoke()));
+                ResetDownloadFileVariables();
+            }
+            catch (Exception ex)
+            {
+                string errorMsg = string.Format(@"Error downloading the remote file: {0}", ex.Message);
+                LogTracer.Instance.Trace(errorMsg, TraceEventType.Error);
+                PM_EventError errorCallback = _fileDownloadErrorCallback;
+                MainContainer.BeginInvoke(new Action(() =>
+                {
                     OnError?.Invoke(errorMsg);
-
-                    _fileDownloadErrorCallback?.Invoke(errorMsg);
-                    ResetDownloadFileVariables();
-                    return;
-                }
-                else
-                {
-                    if (!e.Cancelled)
-                    {
-                        // Downloaded OK
-                        string errorMsg;
-
-                        if (!File.Exists(fileData.LocalFile + FileUtility.DOWNLOADING_FILE_POSTFIX))
-                        {
-                            errorMsg = @"Unable to find the downloaded file";
-                            LogTracer.Instance.Trace(string.Format("{0} {1} - presentation {2}", errorMsg, fileData.LocalFile + FileUtility.DOWNLOADING_FILE_POSTFIX, _presentation.Get<int>("id")), TraceEventType.Error);
-                            OnError?.Invoke(errorMsg);
-                            _fileDownloadErrorCallback?.Invoke(errorMsg);
-                            ResetDownloadFileVariables();
-                            return;
-                        }
-
-                        // rename the file downloaded
-                        File.Move(fileData.LocalFile + FileUtility.DOWNLOADING_FILE_POSTFIX, fileData.LocalFile);
-
-
-                        // check if the download worked fine
-                        if (!File.Exists(fileData.LocalFile))
-                        {
-                            errorMsg = @"Unable to download the file locally";
-                            LogTracer.Instance.Trace(string.Format("{0} {1} - presentation {2}", errorMsg, fileData.FileName, _presentation.Get<int>("id")), System.Diagnostics.TraceEventType.Error);
-                            OnError?.Invoke(errorMsg);
-                            _fileDownloadErrorCallback?.Invoke(errorMsg);
-                            ResetDownloadFileVariables();
-                            return;
-                        }
-
-                        if (!_isCurrentDownloadFromLiveContent)
-                        {
-                            // add the local file path to the scenes data JSON list to avoid new path generation during the scene play
-                            if (!AddLocalFileNamePathToScenesData(fileData.FileName, fileData.LocalFile))
-                            {
-                                errorMsg = @"Unable to add the local file path";
-                                LogTracer.Instance.Trace(string.Format("{0} '{1}' to the scene JSON data - presentation {2}", errorMsg, fileData.LocalFile, _presentation.Get<int>("id")), System.Diagnostics.TraceEventType.Error);
-                                OnError?.Invoke(errorMsg);
-                                _fileDownloadErrorCallback?.Invoke(errorMsg);
-                                ResetDownloadFileVariables();
-                                return;
-                            }
-                        }
-
-                        _currentFileDataIndex++;
-                        DownloadNextFile();
-                    }
-                    else
-                    {
-                        // this situation is true when the room controller unload the room while the client is downloading the presentation data
-                        _fileDownloadSuccessCallback?.Invoke();
-                        ResetDownloadFileVariables();
-                    }
-                }
-            }));
+                    errorCallback?.Invoke(errorMsg);
+                }));
+                ResetDownloadFileVariables();
+            }
         }
 
-        private void DownloadNextFile()
+        private async Task DownloadNextFileAsync()
         {
-            if (_currentClientDownload == null)
-            {
-                // the donwload process is stopped by a new NodeJS derective
-                ResetDownloadFileVariables();
-                return;
-            }
-
-            if (_currentFileDatas == null || _currentFileDataIndex < 0 || _currentFileDataIndex >= _currentFileDatas.Length)
-            {
-                // end of the file data lists       
-                IsUnloaded = false;
-                _fileDownloadSuccessCallback?.Invoke();
-                ResetDownloadFileVariables();
-                return;
-            }
-
             FileData fileData = _currentFileDatas[_currentFileDataIndex];
             if (fileData == null)
             {
-                // pass to the next file data
                 _currentFileDataIndex++;
-                DownloadNextFile();
                 return;
             }
-
-            string errorMsg = null;
 
             if (fileData.FileName.ToLower().IndexOf(@"http://") != -1 ||
                 fileData.FileName.ToLower().IndexOf(@"https://") != -1 ||
@@ -488,75 +429,35 @@ namespace ContentDistributionPlayer.Components
                 }
                 else
                 {
-                    fileNameOnly = string.Format("{0}-{1}-{2}", fileData.ResourceId, fileNameOnly.Substring(0, posExt), fileData.Version);
+                    fileNameOnly = string.Format("{0}-{1}-{2}", fileData.ResourceId, fileNameOnly, fileData.Version);
                 }
 
                 fileData.LocalFile = Path.Combine(_presentationPath, fileNameOnly);
-
-                // if the local file already exists it will not download again (if the version number is the same)
-                if (!File.Exists(fileData.LocalFile))
-                {
-                    LogTracer.Instance.Trace(string.Format("Download process started for {0}", fileData.FileName));
-
-                    try
-                    {
-                        // trying to download locally 
-                        _currentClientDownload.DownloadFileAsync(new Uri(fileData.FileName), fileData.LocalFile + FileUtility.DOWNLOADING_FILE_POSTFIX);
-                    }
-                    catch (Exception ex)
-                    {
-                        if (_currentClientDownload == null)
-                        {
-                            // this situation is true when the room controller unload the room while the client is downloading the presentation data
-                            _fileDownloadSuccessCallback?.Invoke();
-                            ResetDownloadFileVariables();
-                        }
-                        else
-                        {
-                            // error downloading remote file
-                            errorMsg = string.Format(@"Error downloading the remote file {0} - {1}", fileData.FileName, ex.Message);
-                            LogTracer.Instance.Trace(errorMsg, System.Diagnostics.TraceEventType.Error);
-                            OnError?.Invoke(errorMsg);
-                            _fileDownloadErrorCallback?.Invoke(errorMsg);
-                            ResetDownloadFileVariables();
-                        }
-                    }
-                    return;
-                }
-                else
-                {
-                    LogTracer.Instance.Trace(string.Format("A local file version of the document already exists ({0}) and it will not download again", fileData.LocalFile));
-                }
+                await RemoteFileDownloader.DownloadAsync(fileData.FileName, fileData.LocalFile, false, _currentDownloadCancellation.Token);
 
                 if (!_isCurrentDownloadFromLiveContent)
                 {
                     // add the local file path to the scenes data JSON list to avoid new path generation during the scene play
                     if (!AddLocalFileNamePathToScenesData(fileData.FileName, fileData.LocalFile))
                     {
-                        errorMsg = @"Unable to add the local file path";
+                        string errorMsg = @"Unable to add the local file path";
                         LogTracer.Instance.Trace(string.Format("{0} '{1}' to the scene JSON data - presentation {2}", errorMsg, fileData.LocalFile, _presentation.Get<int>("id")), System.Diagnostics.TraceEventType.Error);
-                        OnError?.Invoke(errorMsg);
-                        _fileDownloadErrorCallback?.Invoke(errorMsg);
-                        ResetDownloadFileVariables();
-                        return;
+                        throw new InvalidOperationException(errorMsg);
                     }
                 }
             }
 
             _currentFileDataIndex++;
-            DownloadNextFile();
         }
 
         private void StopCurrentClientDownload()
         {
-            if (_currentClientDownload != null)
+            if (_currentDownloadCancellation != null)
             {
-                if (_currentClientDownload.IsBusy)
-                    _currentClientDownload.CancelAsync();
-                _currentClientDownload.DownloadFileCompleted -= CurrentClientDownload_DownloadFileCompleted;
-                _currentClientDownload.Dispose();
+                _currentDownloadCancellation.Cancel();
+                _currentDownloadCancellation.Dispose();
             }
-            _currentClientDownload = null;
+            _currentDownloadCancellation = null;
         }
 
         public void Unload(bool purgeDocument = true, bool quitDocumentApp = false)

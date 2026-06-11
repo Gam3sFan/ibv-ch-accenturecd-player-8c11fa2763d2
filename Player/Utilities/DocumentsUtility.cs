@@ -10,6 +10,9 @@ namespace ContentDistributionPlayer.Utilities
 {
     class DocumentsUtility
     {
+        private static readonly object _trackedOfficeLock = new object();
+        private static readonly HashSet<int> _trackedPowerPointProcessIds = new HashSet<int>();
+
         public enum DocumentTypes
         {
             None,
@@ -235,13 +238,67 @@ namespace ContentDistributionPlayer.Utilities
             return docType;
         }
 
+        public static HashSet<int> GetPowerPointProcessSnapshot()
+        {
+            return new HashSet<int>(Process.GetProcessesByName("POWERPNT").Select(process => process.Id));
+        }
+
+        public static void TrackNewPowerPointProcesses(HashSet<int> beforeSnapshot)
+        {
+            if (beforeSnapshot == null)
+                beforeSnapshot = new HashSet<int>();
+
+            try
+            {
+                Process[] ppt = Process.GetProcessesByName("POWERPNT");
+                lock (_trackedOfficeLock)
+                {
+                    foreach (Process process in ppt)
+                    {
+                        if (!beforeSnapshot.Contains(process.Id))
+                        {
+                            _trackedPowerPointProcessIds.Add(process.Id);
+                            LogTracer.Instance.Trace(string.Format("Tracked PowerPoint process started by player: {0}", process.Id));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogTracer.Instance.Trace(string.Format("Error tracking PowerPoint processes: {0}", ex.Message), TraceEventType.Warning);
+            }
+        }
+
         public static void KillAllOfficeProcesses()
         {
             try
             {
-                Process[] ppt = Process.GetProcessesByName("POWERPNT");
-                foreach (Process temp in ppt)
-                    temp.Kill();
+                int[] trackedIds;
+                lock (_trackedOfficeLock)
+                    trackedIds = _trackedPowerPointProcessIds.ToArray();
+
+                foreach (int processId in trackedIds)
+                {
+                    try
+                    {
+                        Process process = Process.GetProcessById(processId);
+                        if (!process.HasExited)
+                        {
+                            process.Kill();
+                            LogTracer.Instance.Trace(string.Format("Killed tracked PowerPoint process: {0}", processId));
+                        }
+                    }
+                    catch (ArgumentException)
+                    {
+                    }
+                    catch (Exception ex)
+                    {
+                        LogTracer.Instance.Trace(string.Format("Error killing tracked PowerPoint process {0}: {1}", processId, ex.Message), TraceEventType.Warning);
+                    }
+                }
+
+                lock (_trackedOfficeLock)
+                    _trackedPowerPointProcessIds.Clear();
             }
             catch(Exception ex)
             {

@@ -144,4 +144,3 @@ namespace ContentDistributionPlayer
         private System.Windows.Forms.Panel panLiveContentContainer;
     }
 }
-
