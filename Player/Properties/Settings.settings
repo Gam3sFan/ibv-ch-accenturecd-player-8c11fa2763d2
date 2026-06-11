@@ -1,0 +1,36 @@
+﻿<?xml version='1.0' encoding='utf-8'?>
+<SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="ContentDistributionPlayer.Properties" GeneratedClassName="Settings">
+  <Profiles />
+  <Settings>
+    <Setting Name="UseFullScreen" Type="System.Boolean" Scope="Application">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="PurgePresentationData" Type="System.Boolean" Scope="Application">
+      <Value Profile="(Default)">True</Value>
+    </Setting>
+    <Setting Name="Room" Type="System.Int32" Scope="Application">
+      <Value Profile="(Default)">1</Value>
+    </Setting>
+    <Setting Name="Monitor" Type="System.Int32" Scope="Application">
+      <Value Profile="(Default)">1</Value>
+    </Setting>
+    <Setting Name="NodeJSPort" Type="System.Int32" Scope="Application">
+      <Value Profile="(Default)">8086</Value>
+    </Setting>
+    <Setting Name="ScreenResolutionWidth" Type="System.Int32" Scope="Application">
+      <Value Profile="(Default)">0</Value>
+    </Setting>
+    <Setting Name="ScreenResolutionHeight" Type="System.Int32" Scope="Application">
+      <Value Profile="(Default)">0</Value>
+    </Setting>
+    <Setting Name="NodeJSProtocol" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">wss</Value>
+    </Setting>
+    <Setting Name="NodeJSHost" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">accenture.alunni.biz</Value>
+    </Setting>
+    <Setting Name="ContentsFolder" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">C:\Users\tibof\Documents\Accenture</Value>
+    </Setting>
+  </Settings>
+</SettingsFile>

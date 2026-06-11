@@ -1,0 +1,218 @@
+JSON communication data
+
+*) connection data returned by NodeJS (after connection)
+
+	{
+		"roomPIN": "9999", 
+		"apiURI": "http://192.168.0.201:8100/api/"
+	}
+
+
+
+*) the client publish the following message to the NodeJS server after the connection
+	
+	{
+		"action": "client-info",
+		"data": 
+		{
+			"appVersion": "1.0.0",
+			"resolution":
+			{
+				"width": 1024,
+				"height": 768
+			}
+		}
+	}
+
+
+
+*) if the NodeJS server check that the client is an old version it send the following message
+	
+	{
+		"action": "app-need-update"
+	}
+
+
+
+*) get main settings (after NodeJS connection)
+
+	{
+		"background_color": "#000000",
+		"cover":
+		{
+			"version": 1,
+			"file": "https://neednap.net/sites/accenture/ACIN_COVER_LAST.jpg",
+		}
+	}
+
+
+
+*) when the controller initialise a presentation each clients receive this message:
+
+	{
+		"presentationId": 1,
+		"sceneIndex": 0
+	}	
+
+
+
+*) get the presentation data
+
+	{
+                "id": 1,
+                "title": "This is the first presentation",
+                "enter_transition":
+                {
+			"type": "none"
+                },
+                "background_color": "#222222",
+                "scenes": 
+                [
+			{
+				"id": 1,
+				"title": "Scene name 1",
+				"contents": 
+				[
+					{   
+                        "id": 1,
+                        "scene_id": 1,
+						"resource_id": 1,
+						"version": 1,
+						"file": "https://neednap.net/sites/accenture/Sample1.pptx",
+						"bounds": [0, 0, -1, -1],
+						"z_index": 0,
+						"audio": true,
+						"params":
+						{
+							"slide": 1,
+							"sub_slides": 0
+						}
+					}
+				],
+				"transition":
+				{
+ 					"type": "slideToLeft",
+					"color": "#000000",
+					"duration": 500
+				}
+			},
+                    {
+                        "id": 2,
+                        "title": "Scene name 2",
+                        "contents": 
+                        [
+                            {
+                                "id": 2,
+                                "scene_id": 2,
+                                "resource_id": 1,
+                                "version": 1,
+                                "file": "https://neednap.net/sites/accenture/Sample1.pptx",
+                                "bounds": [0, 0, -1, -1],
+                                "z_index": 0,
+                                "audio": true,
+                                "params":
+                                {
+                                    "slide": 2,
+					"sub_slides": 0
+                                }
+                            }
+                        ],
+                        "transition":
+                        {
+                            "type": "slideToLeft",
+                            "color": "#000000",
+                            "duration": 500
+                        }
+                    },
+                    {
+                        "id": 3,
+                        title": "Scene name 3",
+                        "contents": 
+                        [
+                            {   
+                                "id": 3,
+                                "scene_id": 3,
+                                "resource_id": 2,
+                                "version": 1,
+                                "file"": "https://neednap.net/sites/accenture/Sample2.pptx",
+                                "bounds": [0, 0, 0.5, -1],
+                                "z_index": 0,
+                                "audio": false,
+                                "params":
+                                {
+                                    "slide": 2,
+				"sub_slides": 0
+                                }
+                            },
+                            { 
+                                "id": 4,
+                                "scene_id": 3,
+                                "resource_id": 3,  
+                                "version": 1,
+                                "file": "https://neednap.net/sites/accenture/Video1.mp4",
+                                "bounds": [0.5, 0, 0.5, -1],
+                                "z_index": 0,
+                                "audio": true,
+                                "params": 
+                                {
+                                    "start_from": 60,
+                                    "end_at": 90,
+                                    "loop": true
+                                }
+                            }
+                        ],
+                        "transition":
+                        {
+                            "type": "none",
+                            "color": "#000000",
+                            "duration": 500
+                        }
+                    }
+                ]
+            }
+
+
+*) when the controller send a goto scene action each clients receive this message:
+
+	{		
+		"sceneIndex": 0,
+		"subSceneIndex": 0
+	}
+
+
+*) when the client start the presentation files download it send a message to the server:
+
+	{
+		"action": "download-start"
+	}
+
+
+*) when the client ends the presentation files download it send a message to the server:
+
+	{
+		"action": "download-ended"
+	}
+
+
+*) when the client show a scene/subscene it sends the following message to the server:
+
+	{
+		"action": "scene-changed",
+                "data": 
+                {
+			"sceneIndex": 0, 
+			"subSceneIndex": 0
+		}
+	}
+
+
+*) when the client show a scene and has some error in its content it sends the following message to the server:
+
+	{
+		"action": "scene-content-error",
+                "data": 
+                {
+			"sceneIndex": 0, 
+			"contentIndex": 0
+		}
+	}
