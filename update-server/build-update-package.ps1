@@ -4,7 +4,7 @@ param(
     [string]$Version,
 
     # Base URL of the static server. Ends up in <zipUrl> inside the manifest.
-    [string]$BaseUrl = "http://localhost:8080",
+    [string]$BaseUrl = "http://10.107.188.6/content-update",
 
     # "patch" (1.0.0 -> 1.0.1) or "minor" (1.0.0 -> 1.1.0). Used only when -Version is empty.
     [ValidateSet("patch", "minor")]
@@ -220,7 +220,9 @@ try {
         throw "Player.exe was not found in '$resolvedReleaseDir'."
     }
 
-    $zipName = "Player-$Version.zip"
+    # ZIP name: ContentNuovo_Player_<version without dots>.zip  (e.g. 1.0.1 -> 101)
+    $versionCompact = $Version.Replace(".", "")
+    $zipName = "ContentNuovo_Player_$versionCompact.zip"
     $zipPath = Join-Path $resolvedOutputDir $zipName
     if (Test-Path $zipPath) {
         Remove-Item -LiteralPath $zipPath -Force

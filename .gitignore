@@ -344,3 +344,6 @@ healthchecksdb
 MigrationBackup/
 
 .DS_Store
+
+# Generated update packages (built by update-server/build-update-package.*)
+update-server/*.zip

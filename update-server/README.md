@@ -22,7 +22,7 @@ over HTTP — no database, no backend.
 | `build-update-package.cmd` | One-click entry point. Auto-increments the version, rebuilds, packages, updates the manifest. |
 | `build-update-package.ps1` | The actual logic (version bump → rebuild → ZIP → SHA256 → manifest). |
 | `player-update.xml` | The **manifest** the player reads. Points to the latest version + ZIP + checksum. |
-| `Player-<version>.zip` | A packaged release (created by the script). |
+| `ContentNuovo_Player_<version>.zip` | A packaged release (created by the script; version without dots, e.g. `ContentNuovo_Player_101.zip`). |
 
 ---
 
@@ -69,7 +69,7 @@ That's it. With no arguments, the script will:
 2. **Auto-increment the patch** → `1.0.1`.
 3. Write the new version into `MainForm.cs` (and the assembly metadata).
 4. **Rebuild** the player in Release.
-5. Create `Player-1.0.1.zip` from `Player/bin/Release/`.
+5. Create `ContentNuovo_Player_101.zip` from `Player/bin/Release/`.
 6. Compute its SHA256.
 7. Update `player-update.xml`.
 
@@ -91,7 +91,7 @@ On each client, set in `Player.exe.config`:
 ```xml
 <setting name="AutoUpdateEnabled"   serializeAs="String"><value>True</value></setting>
 <setting name="AutoUpdateManifestUrl" serializeAs="String">
-  <value>http://localhost:8080/player-update.xml</value>
+  <value>http://10.107.188.6/content-update/player-update.xml</value>
 </setting>
 ```
 
@@ -122,7 +122,7 @@ build-update-package.cmd [version] [outputDir] [baseUrl]
 |----------|----------|---------|---------|
 | `%1` | `version` | *auto-increment* | Force a specific version, e.g. `1.5.0`. Leave empty (`""`) to auto-increment. |
 | `%2` | `outputDir` | this folder | Where to write the ZIP + manifest (e.g. your real server root). |
-| `%3` | `baseUrl` | `http://localhost:8080` | Base URL written into `<zipUrl>` in the manifest. |
+| `%3` | `baseUrl` | `http://10.107.188.6/content-update` | Base URL written into `<zipUrl>` in the manifest. |
 
 ### Examples
 
@@ -156,7 +156,7 @@ powershell -ExecutionPolicy Bypass -File .\build-update-package.ps1 -Version 1.0
 |-----------|---------|---------|
 | `-Version` | auto | Explicit version; empty = auto-increment. |
 | `-Increment` | `patch` | `patch` or `minor` (used only when `-Version` is empty). |
-| `-BaseUrl` | `http://localhost:8080` | Base URL for `<zipUrl>`. |
+| `-BaseUrl` | `http://10.107.188.6/content-update` | Base URL for `<zipUrl>`. |
 | `-OutputDir` | script folder | ZIP + manifest destination. |
 | `-ReleaseDir` | `..\Player\bin\Release` | Build output to package. |
 | `-ManifestPath` | `<OutputDir>\player-update.xml` | Manifest file to update. |
@@ -170,7 +170,7 @@ powershell -ExecutionPolicy Bypass -File .\build-update-package.ps1 -Version 1.0
 <?xml version="1.0" encoding="utf-8"?>
 <update>
   <version>1.0.1</version>
-  <zipUrl>http://localhost:8080/Player-1.0.1.zip</zipUrl>
+  <zipUrl>http://10.107.188.6/content-update/ContentNuovo_Player_101.zip</zipUrl>
   <sha256>dcbedafd0c58804f60d4b6c558d790ee3e443bc8dde42dfa938efed363537e3a</sha256>
 </update>
 ```

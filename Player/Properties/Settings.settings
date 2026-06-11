@@ -39,7 +39,7 @@
       <Value Profile="(Default)">True</Value>
     </Setting>
     <Setting Name="AutoUpdateManifestUrl" Type="System.String" Scope="Application">
-      <Value Profile="(Default)">http://localhost:8080/player-update.xml</Value>
+      <Value Profile="(Default)">http://10.107.188.6/content-update/player-update.xml</Value>
     </Setting>
   </Settings>
 </SettingsFile>

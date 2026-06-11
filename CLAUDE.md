@@ -283,7 +283,7 @@ CTRL+G control panel. Point `AutoUpdateManifestUrl` to an XML file like
 ```xml
 <update>
   <version>1.0.1</version>
-  <zipUrl>http://localhost:8080/Player-1.0.1.zip</zipUrl>
+  <zipUrl>http://10.107.188.6/content-update/ContentNuovo_Player_101.zip</zipUrl>
   <sha256></sha256>
 </update>
 ```
@@ -299,7 +299,8 @@ update-server\build-update-package.cmd
 
 With no version argument it **auto-increments the patch** of `MainForm.APP_VERSION` (e.g. `1.0.0` →
 `1.0.1`), writes it back into the source, **rebuilds** the player in Release so the shipped `.exe`
-carries the new version, zips `Player/bin/Release/` as `Player-<version>.zip`, computes SHA256, and
+carries the new version, zips `Player/bin/Release/` as `ContentNuovo_Player_<version>.zip` (version
+without dots, e.g. `ContentNuovo_Player_101.zip`), computes SHA256, and
 updates `player-update.xml`. If the build fails, the source version bump is reverted automatically.
 You can still force a version (`build-update-package.cmd 1.5.0`) or redirect the output to the real
 server root (third arg = base URL):

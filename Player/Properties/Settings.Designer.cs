@@ -133,7 +133,7 @@ namespace ContentDistributionPlayer.Properties {
 
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("http://localhost:8080/player-update.xml")]
+        [global::System.Configuration.DefaultSettingValueAttribute("http://10.107.188.6/content-update/player-update.xml")]
         public string AutoUpdateManifestUrl {
             get {
                 return ((string)(this["AutoUpdateManifestUrl"]));
